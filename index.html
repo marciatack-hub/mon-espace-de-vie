@@ -745,7 +745,7 @@ function crntR(){
   const q=A.searchQ
   let h=`<div class="card"><input id="searchInput" placeholder="🔍 Rechercher dans mes notes..." value="${q}" oninput="A.searchQ=this.value;rSrch()"></div><div id="srchRes">`
   if(!q)h+=`<div class="card"><div class="empty">💭<br>Tape un mot pour chercher</div></div>`
-  else{const found=A.notes.filter(n=>n.texte.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>b.date.localeCompare(a.date));h+=found.length?`<div style="font-size:11px;color:var(--text3);margin-bottom:8px">${found.length} résultat(s)</div>${found.map(n=>{const hl=n.texte.replace(new RegExp(q,'gi'),m=>`<mark style="background:var(--peche-l);color:var(--peche-d)">${m}</mark>`);return`<div class="note-card"><div style="font-size:10px;color:var(--text3);margin-bottom:6px">${fmtDT(n.date)}</div><div style="font-size:12px;line-height:1.7;white-space:pre-wrap">${hl.slice(0,300)}${hl.length>300?'…':''}</div></div>`}).join('')}:`<div class="card"><div class="empty">Aucun résultat</div></div>`}
+  else{const found=A.notes.filter(n=>n.texte.toLowerCase().includes(q.toLowerCase())).sort((a,b)=>b.date.localeCompare(a.date));h+=found.length?`<div style="font-size:11px;color:var(--text3);margin-bottom:8px">${found.length} résultat(s)</div>${found.map(n=>{const hl=n.texte.replace(new RegExp(q,'gi'),m=>`<mark style="background:var(--peche-l);color:var(--peche-d)">${m}</mark>`);return`<div class="note-card"><div style="font-size:10px;color:var(--text3);margin-bottom:6px">${fmtDT(n.date)}</div><div style="font-size:12px;line-height:1.7;white-space:pre-wrap">${hl.slice(0,300)}${hl.length>300?'…':''}</div></div>`}).join('')}`:`<div class="card"><div class="empty">Aucun résultat</div></div>`}
   h+=`</div>`
   return h
 }
