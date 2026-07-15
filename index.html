@@ -124,14 +124,17 @@ table.std tr:last-child td{border-bottom:none}
 </style>
 </head>
 <body>
-<div id="lockScreen" style="position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:14px;padding:20px;text-align:center">
-  <div style="font-size:40px">🔒</div>
-  <div style="font-weight:500;color:var(--text2)">Espace privé</div>
-  <input type="password" id="lockPw" placeholder="Mot de passe" autocomplete="off" style="padding:10px 14px;border:1px solid var(--bd2);border-radius:8px;font-size:14px;width:220px;text-align:center" onkeydown="if(event.key==='Enter')checkLock()">
-  <button class="btn btns" style="background:linear-gradient(135deg,var(--rose-d),var(--mauve-d));color:#fff;border:none;padding:10px 24px" onclick="checkLock()">Entrer</button>
-  <div id="lockErr" style="color:var(--err);font-size:12px;display:none">Mot de passe incorrect</div>
+<div id="authScreen" style="position:fixed;inset:0;background:var(--bg);z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:20px;text-align:center">
+  <div style="font-size:40px">🔐</div>
+  <div id="authTitle" style="font-weight:500;color:var(--text2)">Connexion</div>
+  <input type="email" id="authEmail" placeholder="Email" autocomplete="email" style="padding:10px 14px;border:1px solid var(--bd2);border-radius:8px;font-size:14px;width:240px;text-align:center">
+  <input type="password" id="authPw" placeholder="Mot de passe" autocomplete="current-password" style="padding:10px 14px;border:1px solid var(--bd2);border-radius:8px;font-size:14px;width:240px;text-align:center" onkeydown="if(event.key==='Enter')submitAuth()">
+  <button class="btn btns" id="authSubmitBtn" style="background:linear-gradient(135deg,var(--rose-d),var(--mauve-d));color:#fff;border:none;padding:10px 24px" onclick="submitAuth()">Se connecter</button>
+  <button class="btn btns" id="authToggleBtn" style="font-size:11px;background:none;border:none;color:var(--text3);text-decoration:underline" onclick="toggleAuthMode()">Pas de compte ? Créer un compte</button>
+  <div id="authMsg" style="color:var(--err);font-size:12px;display:none;max-width:260px"></div>
 </div>
 <div id="app">
+  <button id="logoutBtn" onclick="doLogout()" style="position:fixed;top:8px;right:8px;z-index:500;background:rgba(255,255,255,.85);border:1px solid var(--bd2);border-radius:20px;padding:4px 10px;font-size:11px;color:var(--text3);cursor:pointer">🚪 Déconnexion</button>
   <div id="main"></div>
   <nav id="bottom-nav">
     <button class="nav-item" data-mod="business" onclick="setMod('business')"><span class="ni">💼</span><span class="nl">Business</span></button>
@@ -164,16 +167,57 @@ table.std tr:last-child td{border-bottom:none}
 <div class="ov" id="mHabPerso"><div class="mbox"><h4>Habitude personnalisée</h4><label>Nom *</label><input id="hp_nom"><label>Emoji</label><input id="hp_emoji" placeholder="⭐" style="width:80px"><div style="display:flex;gap:8px;margin-top:14px"><button class="btn btns" style="background:linear-gradient(135deg,var(--mint-d),var(--rose-d));color:#fff;border:none" onclick="saveHabPerso()">Ajouter</button><button class="btn btns" onclick="closeM('mHabPerso')">Annuler</button></div></div></div>
 <div class="ov" id="mNoteEdit"><div class="mbox"><h4>Modifier la note</h4><label>Texte</label><textarea id="ne_texte" rows="6"></textarea><label>Tags</label><div id="ne_tags" style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px"></div><div style="display:flex;gap:8px;margin-top:14px"><button class="btn btns" style="background:linear-gradient(135deg,var(--mauve-d),var(--peche-d));color:#fff;border:none" onclick="saveNoteEdit()">Enregistrer</button><button class="btn btns" onclick="closeM('mNoteEdit')">Annuler</button></div></div></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-// ═══════════ VERROU (protection légère, pas une vraie sécurité) ═══════════
-const LOCK_HASH='6e38a2dc03c936861df181d10765e9ae3dd17fa163468afa01769e53dd6bbfb2'
-async function sha256Hex(str){const buf=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(str));return[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('')}
-async function checkLock(){const v=document.getElementById('lockPw').value;if(await sha256Hex(v)===LOCK_HASH){localStorage.setItem('app_unlocked','1');document.getElementById('lockScreen')?.remove()}else{document.getElementById('lockErr').style.display='block'}}
-if(localStorage.getItem('app_unlocked')==='1')document.getElementById('lockScreen')?.remove()
+// ═══════════ AUTH & SYNC CLOUD (Supabase) ═══════════
+const SUPABASE_URL='https://toikmgipjlkjrqxrryyf.supabase.co'
+const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRvaWttZ2lwamxranJxeHJyeXlmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NzUzNzQsImV4cCI6MjA5ODE1MTM3NH0.2zYVMyEInhr-75pSGhX8Ut0RQtavf_SLQxlJlnGDoj4'
+let sb=null,currentUser=null,authMode='signin'
+try{if(typeof supabase!=='undefined')sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY)}catch(e){console.error('supabase init failed',e)}
+if(!sb){const m=document.getElementById('authMsg');if(m){m.textContent='⚠️ Connexion au service impossible (vérifie ta connexion internet), réessaie de recharger la page.';m.style.display='block'}}
+const KEY_FIELD={bv4_sources:'sources',bv4_ca:'caData',bv4_extras:'extras',bv4_crm:'crm',bv4_dep:'depPro',bgt_entries:'entries',bgt_salaire:'salCible',cts_comptes:'comptes',cts_ops:'ops',div_journal:'journal',div_pension:'pension',div_docs:'docs',div_biens:'biens',div_rdvs:'rdvs',vie_hab:'hab',vie_hab_perso:'habPerso',vie_obj:'objectifs',vie_livres:'livres',vie_series:'series',vie_sante:'sante',vie_voyages:'voyages',vie_bucket:'bucket',carnet_notes:'notes'}
+const KEY_DEFAULT={bv4_sources:[],bv4_ca:{},bv4_extras:[],bv4_crm:[],bv4_dep:[],bgt_entries:[],bgt_salaire:1500,cts_comptes:[],cts_ops:[],div_journal:[],div_pension:[],div_docs:[],div_biens:[],div_rdvs:[],vie_hab:{},vie_hab_perso:[],vie_obj:[],vie_livres:[],vie_series:[],vie_sante:[],vie_voyages:[],vie_bucket:[],carnet_notes:[]}
+function reloadAFromLS(){for(const[k,f]of Object.entries(KEY_FIELD))A[f]=ls(k,KEY_DEFAULT[k])}
+async function syncUp(k,v){if(!sb||!currentUser||!KEY_FIELD[k])return;try{await sb.from('kv_store').upsert({user_id:currentUser.id,key:k,value:v,updated_at:new Date().toISOString()})}catch(e){console.error('sync up',k,e)}}
+async function pushAllLocalData(){await Promise.all(Object.keys(KEY_FIELD).map(k=>syncUp(k,ls(k,KEY_DEFAULT[k]))))}
+async function pullData(){
+  if(!sb)return
+  try{
+    const{data,error}=await sb.from('kv_store').select('key,value').eq('user_id',currentUser.id)
+    if(error){document.getElementById('authMsg').textContent='Erreur de synchronisation : '+error.message;document.getElementById('authMsg').style.display='block';return}
+    if(data&&data.length){data.forEach(row=>{if(KEY_FIELD[row.key])localStorage.setItem(row.key,JSON.stringify(row.value))});reloadAFromLS()}
+    else await pushAllLocalData()
+  }catch(e){console.error('pull data',e)}
+}
+function toggleAuthMode(){authMode=authMode==='signin'?'signup':'signin';document.getElementById('authTitle').textContent=authMode==='signin'?'Connexion':'Créer un compte';document.getElementById('authSubmitBtn').textContent=authMode==='signin'?'Se connecter':'Créer mon compte';document.getElementById('authToggleBtn').textContent=authMode==='signin'?'Pas de compte ? Créer un compte':'Déjà un compte ? Se connecter';document.getElementById('authMsg').style.display='none'}
+async function submitAuth(){
+  const email=document.getElementById('authEmail').value.trim(),pw=document.getElementById('authPw').value,msg=document.getElementById('authMsg')
+  msg.style.display='none'
+  if(!sb){msg.textContent='⚠️ Connexion au service impossible pour le moment. Vérifie ta connexion internet et recharge la page.';msg.style.display='block';return}
+  if(!email||!pw){msg.textContent='Email et mot de passe requis';msg.style.display='block';return}
+  const btn=document.getElementById('authSubmitBtn'),orig=btn.textContent;btn.disabled=true;btn.textContent='...'
+  try{
+    const{data,error}=authMode==='signin'?await sb.auth.signInWithPassword({email,password:pw}):await sb.auth.signUp({email,password:pw})
+    if(error){msg.textContent=error.message;msg.style.display='block';btn.disabled=false;btn.textContent=orig;return}
+    if(authMode==='signup'&&!data.session){msg.style.color='var(--ok)';msg.textContent='Compte créé ! Vérifie tes emails pour confirmer, puis connecte-toi.';msg.style.display='block';btn.disabled=false;btn.textContent=orig;toggleAuthMode();return}
+    currentUser=data.user
+    await pullData()
+    document.getElementById('authScreen')?.remove()
+    render()
+  }catch(e){msg.textContent='Erreur réseau : '+e.message;msg.style.display='block';btn.disabled=false;btn.textContent=orig}
+}
+async function doLogout(){if(!confirm('Se déconnecter ?'))return;if(sb)await sb.auth.signOut();currentUser=null;try{localStorage.clear()}catch{};location.reload()}
+async function checkSession(){
+  if(!sb)return
+  try{
+    const{data:{session}}=await sb.auth.getSession()
+    if(session){currentUser=session.user;await pullData();document.getElementById('authScreen')?.remove();render()}
+  }catch(e){console.error('session check',e)}
+}
 
 // ═══════════ UTILS ═══════════
 function ls(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch{return d}}
-function sv(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch{}}
+function sv(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch{};syncUp(k,v)}
 function commitEdit(arrKey,storeKey,obj,prepend){const arr=A[arrKey];if(A.editKey===arrKey&&A.editI!==null){obj.id=arr[A.editI].id;arr[A.editI]=obj}else{obj.id=obj.id||Date.now();prepend?arr.unshift(obj):arr.push(obj)}sv(storeKey,arr);A.editKey=null;A.editI=null}
 function trunc(t,n=150){return t&&t.length>n?t.slice(0,n)+'…':(t||'')}
 const fmt=(n,d=0)=>isNaN(n)?'—':(+n).toLocaleString('fr-FR',{minimumFractionDigits:d,maximumFractionDigits:d})
@@ -819,6 +863,7 @@ function toggleMic(){const btn=document.getElementById('micBtn'),st=document.get
 
 // ═══════════ START ═══════════
 render()
+checkSession()
 </script>
 </body>
 </html>
