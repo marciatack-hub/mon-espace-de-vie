@@ -176,8 +176,8 @@ let sb=null,currentUser=null,authMode='signin'
 try{if(typeof supabase!=='undefined')sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY)}catch(e){console.error('supabase init failed',e)}
 if(!sb){const m=document.getElementById('authMsg');if(m){m.textContent='⚠️ Connexion au service impossible (vérifie ta connexion internet), réessaie de recharger la page.';m.style.display='block'}}
 const DEFAULT_POCHES=[{id:'charges_appart',nom:'Charges appartement',color:'#F5C4A8'},{id:'vacances',nom:'Vacances',color:'#A8D4C4'},{id:'urgence',nom:"Fonds d'urgence",color:'#C4A8D4'},{id:'perso',nom:'Épargne perso',color:'#E8A4B8'},{id:'divers',nom:'Divers',color:'#9B7090'}]
-const KEY_FIELD={bv4_sources:'sources',bv4_ca:'caData',bv4_extras:'extras',bv4_crm:'crm',bv4_dep:'depPro',bgt_entries:'entries',bgt_salaire:'salCible',cts_comptes:'comptes',cts_ops:'ops',cts_poches:'poches',div_journal:'journal',div_pension:'pension',div_docs:'docs',div_biens:'biens',div_rdvs:'rdvs',vie_hab:'hab',vie_hab_perso:'habPerso',vie_obj:'objectifs',vie_livres:'livres',vie_series:'series',vie_sante:'sante',vie_voyages:'voyages',vie_bucket:'bucket',carnet_notes:'notes'}
-const KEY_DEFAULT={bv4_sources:[],bv4_ca:{},bv4_extras:[],bv4_crm:[],bv4_dep:[],bgt_entries:[],bgt_salaire:1500,cts_comptes:[],cts_ops:[],cts_poches:DEFAULT_POCHES,div_journal:[],div_pension:[],div_docs:[],div_biens:[],div_rdvs:[],vie_hab:{},vie_hab_perso:[],vie_obj:[],vie_livres:[],vie_series:[],vie_sante:[],vie_voyages:[],vie_bucket:[],carnet_notes:[]}
+const KEY_FIELD={bv4_sources:'sources',bv4_ca:'caData',bv4_extras:'extras',bv4_crm:'crm',bv4_dep:'depPro',bgt_entries:'entries',bgt_salaire:'salCible',bgt_ep_cible:'epCible',bgt_targets:'budgetTargets',cts_comptes:'comptes',cts_ops:'ops',cts_poches:'poches',div_journal:'journal',div_pension:'pension',div_docs:'docs',div_biens:'biens',div_rdvs:'rdvs',vie_hab:'hab',vie_hab_perso:'habPerso',vie_obj:'objectifs',vie_livres:'livres',vie_series:'series',vie_sante:'sante',vie_voyages:'voyages',vie_bucket:'bucket',carnet_notes:'notes'}
+const KEY_DEFAULT={bv4_sources:[],bv4_ca:{},bv4_extras:[],bv4_crm:[],bv4_dep:[],bgt_entries:[],bgt_salaire:1500,bgt_ep_cible:200,bgt_targets:{},cts_comptes:[],cts_ops:[],cts_poches:DEFAULT_POCHES,div_journal:[],div_pension:[],div_docs:[],div_biens:[],div_rdvs:[],vie_hab:{},vie_hab_perso:[],vie_obj:[],vie_livres:[],vie_series:[],vie_sante:[],vie_voyages:[],vie_bucket:[],carnet_notes:[]}
 function reloadAFromLS(){for(const[k,f]of Object.entries(KEY_FIELD))A[f]=ls(k,KEY_DEFAULT[k])}
 async function syncUp(k,v){if(!sb||!currentUser||!KEY_FIELD[k])return;try{await sb.from('kv_store').upsert({user_id:currentUser.id,key:k,value:v,updated_at:new Date().toISOString()})}catch(e){console.error('sync up',k,e)}}
 async function pushAllLocalData(){await Promise.all(Object.keys(KEY_FIELD).map(k=>syncUp(k,ls(k,KEY_DEFAULT[k]))))}
@@ -248,6 +248,7 @@ let A={
   crm:ls('bv4_crm',[]),depPro:ls('bv4_dep',[]),crmExp:null,impPrev:null,
   bgtTab:'Dashboard',bgtMois:new Date().getMonth(),
   entries:ls('bgt_entries',[]),salCible:ls('bgt_salaire',1500),bgtImpPrev:null,
+  epCible:ls('bgt_ep_cible',200),budgetTargets:ls('bgt_targets',{}),
   cptTab:'Comptes',comptes:ls('cts_comptes',[]),ops:ls('cts_ops',[]),editCptI:null,
   poches:ls('cts_poches',DEFAULT_POCHES),
   divTab:'Tableau de bord',
@@ -423,9 +424,10 @@ function confBizCSV(){
 // ═══════════ BUDGET (calculé automatiquement depuis le compte perso) ═══════════
 function persoIds(){return A.comptes.filter(c=>c.type==='perso').map(c=>c.id)}
 function proIds(){return A.comptes.filter(c=>c.type==='pro').map(c=>c.id)}
-function bgtOpsMonth(yr,mo){const pids=persoIds();return A.ops.filter(o=>{if(!o.date)return false;const d=new Date(o.date);if(isNaN(d)||d.getFullYear()!==yr||d.getMonth()!==mo)return false;if(o.type==='virement')return pids.includes(o.from)||pids.includes(o.to);return pids.includes(o.cpt)})}
+function epargneIds(){return A.comptes.filter(c=>c.type==='epargne').map(c=>c.id)}
+function bgtOpsMonth(yr,mo){const pids=persoIds(),prids=proIds(),eids=epargneIds();return A.ops.filter(o=>{if(!o.date)return false;const d=new Date(o.date);if(isNaN(d)||d.getFullYear()!==yr||d.getMonth()!==mo)return false;if(o.type==='virement')return pids.includes(o.from)||pids.includes(o.to)||(prids.includes(o.from)&&eids.includes(o.to));return pids.includes(o.cpt)})}
 function bgtClassify(ops){
-  const pids=persoIds(),prids=proIds()
+  const pids=persoIds(),prids=proIds(),eids=epargneIds()
   let revenus=0,depenses=0,epargne=0,salaire=0
   const depCat={},revCat={},epPoche={}
   ops.forEach(o=>{
@@ -435,6 +437,7 @@ function bgtClassify(ops){
       const fIn=pids.includes(o.from),tIn=pids.includes(o.to)
       if(tIn&&!fIn){revenus+=o.m;revCat[o.cat]=(revCat[o.cat]||0)+o.m;if(prids.includes(o.from))salaire+=o.m}
       else if(fIn&&!tIn){epargne+=o.m;const pk=o.poche||'_sans';epPoche[pk]=(epPoche[pk]||0)+o.m}
+      else if(!fIn&&!tIn&&prids.includes(o.from)&&eids.includes(o.to)){epargne+=o.m;const pk=o.poche||'_sans';epPoche[pk]=(epPoche[pk]||0)+o.m}
     }
   })
   return{revenus,depenses,epargne,salaire,depCat,revCat,epPoche}
@@ -451,20 +454,32 @@ function rBgt(){
 function bgDash(){
   if(!persoIds().length)return`<div class="card"><div class="empty">🏦<br><strong>Aucun compte personnel</strong><br>Crée un compte de type "Personnel" dans l'onglet Comptes pour que ton budget se calcule automatiquement à partir de tes vraies opérations.</div></div>`
   const m=A.bgtMois
-  let h=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><div style="font-size:12px;color:var(--text2)">Salaire cible :</div><div style="font-weight:500;font-size:14px;color:var(--mint-d)">${fE(A.salCible)}/mois</div><button class="btn btns" onclick="const v=prompt('Salaire cible (€) :',A.salCible);if(v){A.salCible=parseFloat(v)||1500;sv('bgt_salaire',A.salCible);render()}">Modifier</button></div>`
+  let h=`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><div style="font-size:12px;color:var(--text2)">Salaire cible :</div><div style="font-weight:500;font-size:14px;color:var(--mint-d)">${fE(A.salCible)}/mois</div><button class="btn btns" onclick="const v=prompt('Salaire cible (€) :',A.salCible);if(v){A.salCible=parseFloat(v)||1500;sv('bgt_salaire',A.salCible);render()}">Modifier</button></div>`
+  h+=`<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px"><div style="font-size:12px;color:var(--text2)">Objectif épargne :</div><div style="font-weight:500;font-size:14px;color:var(--mint-d)">${fE(A.epCible)}/mois</div><button class="btn btns" onclick="const v=prompt('Objectif épargne mensuel (€) :',A.epCible);if(v){A.epCible=parseFloat(v)||0;sv('bgt_ep_cible',A.epCible);render()}">Modifier</button></div>`
   h+=`<div class="month-grid">${MOIS.map((mn,i)=>{const has=bgtOpsMonth(A.yr,i).length>0;return`<button class="mb${has?' has':''}${A.bgtMois===i?' sel':''}" onclick="A.bgtMois=${i};render()">${MS[i]}</button>`}).join('')}</div>`
   const c=bgtClassify(bgtOpsMonth(A.yr,m)),sol=c.revenus-c.depenses-c.epargne
   h+=`<div class="kgrid"><div class="kpi"><div class="kl">Revenus ${MS[m]}</div><div class="kv" style="color:var(--ok)">${fE(c.revenus)}</div></div><div class="kpi"><div class="kl">Dépenses</div><div class="kv" style="color:var(--err)">${fE(c.depenses)}</div></div><div class="kpi"><div class="kl">Épargne</div><div class="kv" style="color:var(--mint-d)">${fE(c.epargne)}</div></div><div class="kpi"><div class="kl">Solde</div><div class="kv" style="color:${sol>=0?'var(--ok)':'var(--err)'}">${fE(sol)}</div></div></div>`
   if(c.salaire&&c.salaire<A.salCible)h+=`<div class="alert aw">⚠️ Salaire versé (${fE(c.salaire)}) inférieur à ta cible (${fE(A.salCible)})</div>`
+  const isCurMonth=A.yr===new Date().getFullYear()&&m===new Date().getMonth()
+  if(A.epCible&&c.epargne<A.epCible&&isCurMonth&&new Date().getDate()>=20)h+=`<div class="alert aw">⚠️ Tu n'as encore viré que ${fE(c.epargne)} vers l'épargne ce mois-ci (objectif ${fE(A.epCible)}) — pense à faire le virement avant la fin du mois</div>`
   if(sol<0)h+=`<div class="alert" style="background:var(--rose-l);border-left:3px solid var(--rose-d);border-radius:8px;padding:9px 12px;font-size:11px;color:var(--rose-d);margin-bottom:10px">⚠️ Solde négatif ce mois</div>`
   const mn=MOIS.map((_,i)=>{const cc=bgtClassify(bgtOpsMonth(A.yr,i));return cc.revenus-cc.depenses-cc.epargne}),mxa=Math.max(1,...mn.map(n=>Math.abs(n)))
   h+=`<div class="card"><h3>Solde mensuel</h3><div style="display:flex;align-items:center;gap:3px;height:70px;padding-top:10px">${mn.map((n,i)=>{const hh=n?Math.max(2,Math.round(Math.abs(n)/mxa*50)):0;return`<div class="bar-wrap"><div style="width:100%;height:${hh}px;background:${n===0?'var(--lav2)':n>0?'var(--mint-d)':'var(--rose-d)'};border-radius:3px 3px 0 0"></div><div style="font-size:7px;color:var(--text3);margin-top:2px">${MS[i]}</div></div>`}).join('')}</div></div>`
+  const posteCats=[...new Set([...CAT_DB.filter(cc=>cc!=='Autre à préciser...'),...Object.keys(A.budgetTargets)])]
+  const shown=posteCats.filter(cat=>A.budgetTargets[cat]||c.depCat[cat])
+  h+=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">Postes de budget — ${MOIS[m]}</h3><button class="btn btns" style="font-size:10px" onclick="addBudgetPoste()">+ Poste</button></div>`
+  if(!shown.length)h+=`<div style="font-size:11px;color:var(--text3)">Aucun poste défini — clique "+ Poste" pour fixer un objectif par catégorie (ex: Alimentation 400€/mois)</div>`
+  shown.sort((a,b)=>(c.depCat[b]||0)-(c.depCat[a]||0)).forEach(cat=>{const target=A.budgetTargets[cat]||0,spent=c.depCat[cat]||0,over=target&&spent>target,pct=target?Math.min(100,Math.round(spent/target*100)):0;h+=`<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:3px"><span>${cat}</span><span style="cursor:pointer;color:var(--text2)" onclick="setBudgetTarget('${cat.replace(/'/g,"\\'")}')">${fE(spent)}${target?' / '+fE(target):''} ✏️</span></div>${target?`<div class="prog-bar"><div class="prog-fill" style="width:${pct}%;background:${over?'var(--err)':'var(--mint-d)'}"></div></div>`:''}</div>`})
+  h+=`</div>`
   if(Object.keys(c.depCat).length)h+=`<div class="card"><h3>Dépenses par catégorie — ${MOIS[m]}</h3>${Object.entries(c.depCat).sort((a,b)=>b[1]-a[1]).map(([cat,v])=>`<div class="row"><span>${cat}</span><span style="font-weight:500;color:var(--err)">${fE(v)}</span></div>`).join('')}</div>`
   if(Object.keys(c.epPoche).length)h+=`<div class="card"><h3>Épargne par poche — ${MOIS[m]}</h3>${Object.entries(c.epPoche).sort((a,b)=>b[1]-a[1]).map(([pk,v])=>`<div class="row"><span>${pocheNom(pk)}</span><span style="font-weight:500;color:var(--mint-d)">${fE(v)}</span></div>`).join('')}<div style="font-size:10px;color:var(--text3);margin-top:6px">Détail dans Comptes → Épargne</div></div>`
   const enf=A.ops.filter(o=>o.enfant&&o.date&&!isNaN(new Date(o.date))&&new Date(o.date).getFullYear()===A.yr&&new Date(o.date).getMonth()===m)
   if(enf.length)h+=`<div class="card"><h3>👶 Dépenses enfants — ${MOIS[m]}</h3><div class="row"><span>Total</span><span style="font-weight:500;color:var(--err)">${fE(enf.reduce((s,o)=>s+o.m,0))}</span></div><div style="font-size:10px;color:var(--text3);margin-top:6px">Détail dans Comptes → Enfants</div></div>`
   return h
 }
+
+function setBudgetTarget(cat){const cur=A.budgetTargets[cat]||'';const v=prompt(`Objectif mensuel pour "${cat}" (€) — laisse vide pour retirer :`,cur);if(v===null)return;const n=parseFloat(v)||0;if(n<=0)delete A.budgetTargets[cat];else A.budgetTargets[cat]=n;sv('bgt_targets',A.budgetTargets);render()}
+function addBudgetPoste(){const avail=CAT_DB.filter(c=>c!=='Autre à préciser...'&&!A.budgetTargets[c]);if(!avail.length){alert('Tous les postes ont déjà un objectif.');return}const cat=prompt('Sur quelle catégorie fixer un objectif ?\n\n'+avail.join('\n'));if(!cat||!avail.includes(cat.trim()))return;setBudgetTarget(cat.trim())}
 
 function bgRec(){
   if(!persoIds().length)return`<div class="card"><div class="empty">🏦<br>Crée d'abord un compte personnel dans l'onglet Comptes</div></div>`
