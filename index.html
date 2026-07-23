@@ -131,10 +131,14 @@ table.std tr:last-child td{border-bottom:none}
   <input type="password" id="authPw" placeholder="Mot de passe" autocomplete="current-password" style="padding:10px 14px;border:1px solid var(--bd2);border-radius:8px;font-size:14px;width:240px;text-align:center" onkeydown="if(event.key==='Enter')submitAuth()">
   <button class="btn btns" id="authSubmitBtn" style="background:linear-gradient(135deg,var(--rose-d),var(--mauve-d));color:#fff;border:none;padding:10px 24px" onclick="submitAuth()">Se connecter</button>
   <button class="btn btns" id="authToggleBtn" style="font-size:11px;background:none;border:none;color:var(--text3);text-decoration:underline" onclick="toggleAuthMode()">Pas de compte ? Créer un compte</button>
+  <button class="btn btns" id="authForgotBtn" style="font-size:11px;background:none;border:none;color:var(--text3);text-decoration:underline" onclick="forgotPassword()">Mot de passe oublié ?</button>
   <div id="authMsg" style="color:var(--err);font-size:12px;display:none;max-width:260px"></div>
 </div>
 <div id="app">
-  <button id="logoutBtn" onclick="doLogout()" style="position:fixed;top:8px;right:8px;z-index:500;background:rgba(255,255,255,.85);border:1px solid var(--bd2);border-radius:20px;padding:4px 10px;font-size:11px;color:var(--text3);cursor:pointer">🚪 Déconnexion</button>
+  <div style="position:fixed;top:8px;right:8px;z-index:500;display:flex;gap:6px">
+    <button id="exportBtn" onclick="exportAllData()" style="background:rgba(255,255,255,.85);border:1px solid var(--bd2);border-radius:20px;padding:4px 10px;font-size:11px;color:var(--text3);cursor:pointer">⬇️ Export</button>
+    <button id="logoutBtn" onclick="doLogout()" style="background:rgba(255,255,255,.85);border:1px solid var(--bd2);border-radius:20px;padding:4px 10px;font-size:11px;color:var(--text3);cursor:pointer">🚪 Déconnexion</button>
+  </div>
   <div id="main"></div>
   <nav id="bottom-nav">
     <button class="nav-item" data-mod="business" onclick="setMod('business')"><span class="ni">💼</span><span class="nl">Business</span></button>
@@ -171,7 +175,7 @@ table.std tr:last-child td{border-bottom:none}
 // ═══════════ AUTH & SYNC CLOUD (Supabase) ═══════════
 const SUPABASE_URL='https://toikmgipjlkjrqxrryyf.supabase.co'
 const SUPABASE_ANON_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRvaWttZ2lwamxranJxeHJyeXlmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI1NzUzNzQsImV4cCI6MjA5ODE1MTM3NH0.2zYVMyEInhr-75pSGhX8Ut0RQtavf_SLQxlJlnGDoj4'
-let sb=null,currentUser=null,authMode='signin'
+let sb=null,currentUser=null,authMode='signin',recoveryMode=false,pendingSyncs=0
 try{if(typeof supabase!=='undefined')sb=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY)}catch(e){console.error('supabase init failed',e)}
 if(!sb){const m=document.getElementById('authMsg');if(m){m.textContent='⚠️ Connexion au service impossible (vérifie ta connexion internet), réessaie de recharger la page.';m.style.display='block'}}
 const DEFAULT_POCHES=[{id:'charges_appart',nom:'Charges appartement',color:'#F5C4A8'},{id:'vacances',nom:'Vacances',color:'#A8D4C4'},{id:'urgence',nom:"Fonds d'urgence",color:'#C4A8D4'},{id:'perso',nom:'Épargne perso',color:'#E8A4B8'},{id:'divers',nom:'Divers',color:'#9B7090'}]
@@ -179,7 +183,17 @@ const DEFAULT_CTAGS=[{id:'chouette',label:'✨ Chouette',color:'#F5C4A8',text:'#
 const KEY_FIELD={bv4_sources:'sources',bv4_ca:'caData',bv4_extras:'extras',bv4_crm:'crm',bv4_dep:'depPro',bgt_entries:'entries',bgt_salaire:'salCible',bgt_ep_cible:'epCible',bgt_targets:'budgetTargets',cts_comptes:'comptes',cts_ops:'ops',cts_poches:'poches',div_journal:'journal',div_pension:'pension',div_docs:'docs',div_biens:'biens',div_rdvs:'rdvs',vie_hab:'hab',vie_hab_perso:'habPerso',vie_obj:'objectifs',vie_livres:'livres',vie_series:'series',vie_sante:'sante',vie_voyages:'voyages',vie_bucket:'bucket',carnet_notes:'notes',carnet_tags:'ctags'}
 const KEY_DEFAULT={bv4_sources:[],bv4_ca:{},bv4_extras:[],bv4_crm:[],bv4_dep:[],bgt_entries:[],bgt_salaire:1500,bgt_ep_cible:200,bgt_targets:{},cts_comptes:[],cts_ops:[],cts_poches:DEFAULT_POCHES,div_journal:[],div_pension:[],div_docs:[],div_biens:[],div_rdvs:[],vie_hab:{},vie_hab_perso:[],vie_obj:[],vie_livres:[],vie_series:[],vie_sante:[],vie_voyages:[],vie_bucket:[],carnet_notes:[],carnet_tags:DEFAULT_CTAGS}
 function reloadAFromLS(){for(const[k,f]of Object.entries(KEY_FIELD))A[f]=ls(k,KEY_DEFAULT[k])}
-async function syncUp(k,v){if(!sb||!currentUser||!KEY_FIELD[k])return;try{await sb.from('kv_store').upsert({user_id:currentUser.id,key:k,value:v,updated_at:new Date().toISOString()})}catch(e){console.error('sync up',k,e)}}
+function exportAllData(){
+  const data={}
+  Object.keys(KEY_FIELD).forEach(k=>{data[k]=ls(k,KEY_DEFAULT[k])})
+  const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'})
+  const url=URL.createObjectURL(blob)
+  const a=document.createElement('a')
+  a.href=url;a.download=`mon-espace-de-vie-export-${new Date().toISOString().slice(0,10)}.json`
+  document.body.appendChild(a);a.click();a.remove()
+  URL.revokeObjectURL(url)
+}
+async function syncUp(k,v){if(!sb||!currentUser||!KEY_FIELD[k])return;pendingSyncs++;try{await sb.from('kv_store').upsert({user_id:currentUser.id,key:k,value:v,updated_at:new Date().toISOString()})}catch(e){console.error('sync up',k,e)}finally{pendingSyncs--}}
 async function pushAllLocalData(){await Promise.all(Object.keys(KEY_FIELD).map(k=>syncUp(k,ls(k,KEY_DEFAULT[k]))))}
 async function pullData(){
   if(!sb)return
@@ -192,9 +206,11 @@ async function pullData(){
 }
 function toggleAuthMode(){authMode=authMode==='signin'?'signup':'signin';document.getElementById('authTitle').textContent=authMode==='signin'?'Connexion':'Créer un compte';document.getElementById('authSubmitBtn').textContent=authMode==='signin'?'Se connecter':'Créer mon compte';document.getElementById('authToggleBtn').textContent=authMode==='signin'?'Pas de compte ? Créer un compte':'Déjà un compte ? Se connecter';document.getElementById('authMsg').style.display='none'}
 async function submitAuth(){
-  const email=document.getElementById('authEmail').value.trim(),pw=document.getElementById('authPw').value,msg=document.getElementById('authMsg')
+  const msg=document.getElementById('authMsg')
   msg.style.display='none'
   if(!sb){msg.textContent='⚠️ Connexion au service impossible pour le moment. Vérifie ta connexion internet et recharge la page.';msg.style.display='block';return}
+  if(recoveryMode)return finishRecovery()
+  const email=document.getElementById('authEmail').value.trim(),pw=document.getElementById('authPw').value
   if(!email||!pw){msg.textContent='Email et mot de passe requis';msg.style.display='block';return}
   const btn=document.getElementById('authSubmitBtn'),orig=btn.textContent;btn.disabled=true;btn.textContent='...'
   try{
@@ -207,12 +223,50 @@ async function submitAuth(){
     render()
   }catch(e){msg.textContent='Erreur réseau : '+e.message;msg.style.display='block';btn.disabled=false;btn.textContent=orig}
 }
-async function doLogout(){if(!confirm('Se déconnecter ?'))return;if(sb)await sb.auth.signOut();currentUser=null;try{localStorage.clear()}catch{};location.reload()}
+async function forgotPassword(){
+  const msg=document.getElementById('authMsg')
+  msg.style.display='none';msg.style.color='var(--err)'
+  if(!sb){msg.textContent='⚠️ Connexion au service impossible pour le moment.';msg.style.display='block';return}
+  const email=document.getElementById('authEmail').value.trim()
+  if(!email){msg.textContent="Entre ton email ci-dessus d'abord";msg.style.display='block';return}
+  const{error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.href.split('#')[0]})
+  if(error){msg.textContent=error.message;msg.style.display='block';return}
+  msg.style.color='var(--ok)';msg.textContent='Email envoyé ! Clique le lien reçu pour choisir un nouveau mot de passe.';msg.style.display='block'
+}
+async function finishRecovery(){
+  const pw=document.getElementById('authPw').value,msg=document.getElementById('authMsg')
+  if(!pw||pw.length<6){msg.textContent='Mot de passe trop court (6 caractères minimum)';msg.style.display='block';return}
+  const btn=document.getElementById('authSubmitBtn'),orig=btn.textContent;btn.disabled=true;btn.textContent='...'
+  const{error}=await sb.auth.updateUser({password:pw})
+  if(error){msg.textContent=error.message;msg.style.display='block';btn.disabled=false;btn.textContent=orig;return}
+  recoveryMode=false
+  document.getElementById('authScreen')?.remove()
+  await pullData()
+  render()
+}
+async function doLogout(){
+  if(!confirm('Se déconnecter ?'))return
+  let waited=0
+  while(pendingSyncs>0&&waited<5000){await new Promise(r=>setTimeout(r,150));waited+=150}
+  if(sb)await sb.auth.signOut();currentUser=null;try{localStorage.clear()}catch{};location.reload()
+}
 async function checkSession(){
   if(!sb)return
   try{
+    sb.auth.onAuthStateChange((event,session)=>{
+      if(event==='PASSWORD_RECOVERY'){
+        recoveryMode=true;currentUser=session.user
+        const scr=document.getElementById('authScreen');if(scr)scr.style.display='flex'
+        document.getElementById('authTitle').textContent='Choisis un nouveau mot de passe'
+        document.getElementById('authEmail').style.display='none'
+        document.getElementById('authForgotBtn').style.display='none'
+        document.getElementById('authToggleBtn').style.display='none'
+        document.getElementById('authSubmitBtn').textContent='Valider'
+        document.getElementById('authPw').placeholder='Nouveau mot de passe'
+      }
+    })
     const{data:{session}}=await sb.auth.getSession()
-    if(session){currentUser=session.user;await pullData();document.getElementById('authScreen')?.remove();render()}
+    if(session&&!recoveryMode){currentUser=session.user;await pullData();document.getElementById('authScreen')?.remove();render()}
   }catch(e){console.error('session check',e)}
 }
 
@@ -523,7 +577,7 @@ function cptC(){
   const tot=A.comptes.reduce((s,c)=>s+soldC(c.id),0)
   let h=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><div style="font-size:12px;color:var(--text3)">Patrimoine : <strong style="font-size:16px;color:var(--text)">${fE(tot)}</strong></div><button class="btn btns" style="background:linear-gradient(135deg,var(--mint-d),var(--mauve-d));color:#fff;border:none" onclick="openNewCpt()">+ Compte</button></div>`
   if(!A.comptes.length)return h+`<div class="card"><div class="empty">🏦<br>Aucun compte — ajoute tes comptes avec leur solde actuel</div></div>`
-  ;['pro','perso','epargne','autre'].forEach(type=>{const cs=A.comptes.filter(c=>c.type===type);if(!cs.length)return;const labs={pro:'Professionnel',perso:'Personnel',epargne:'Épargne',autre:'Autre'};h+=`<div style="font-size:10px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">${labs[type]}</div>`;cs.forEach(c=>{const s=soldC(c.id),ci=A.comptes.indexOf(c);let pH='';if(type==='epargne'){const tots={};A.poches.forEach(p=>tots[p.id]=soldP(p.id));const grand=Object.values(tots).reduce((s,v)=>s+v,0);if(grand)pH=`<div style="margin-top:10px;border-top:.5px solid rgba(58,138,106,.2);padding-top:8px">${A.poches.map(p=>tots[p.id]?`<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px"><span>${p.nom}</span><span style="font-weight:500;color:${p.color}">${fE(tots[p.id])}</span></div>`:'').join('')}<div style="font-size:9px;color:var(--text3);margin-top:3px">Non affecté : ${fE(s-grand)}</div></div>`}h+=`<div class="ccard ${cbg(type)}"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:12px;font-weight:500;color:var(--text2)">${c.nom}</div>${c.notes?`<div style="font-size:10px;color:var(--text3)">${c.notes}</div>`:''}</div><div style="display:flex;gap:4px"><button class="btn btns" onclick="openEditCpt(${ci})">✏️</button><button class="btnd" onclick="if(confirm('?')){A.comptes.splice(${ci},1);sv('cts_comptes',A.comptes);render()}">✕</button></div></div><div style="margin-top:10px"><div style="font-size:22px;font-weight:500;color:${s>=0?TYC[type]:'var(--err)'}">${fE(s)}</div><div style="font-size:10px;color:var(--text3);margin-top:2px">Solde initial ${fE(c.soldeInit)} au ${c.soldeDate||'—'}</div></div>${pH}</div>`})})
+  ;['pro','perso','epargne','autre'].forEach(type=>{const cs=A.comptes.filter(c=>c.type===type);if(!cs.length)return;const labs={pro:'Professionnel',perso:'Personnel',epargne:'Épargne',autre:'Autre'};h+=`<div style="font-size:10px;font-weight:500;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">${labs[type]}</div>`;cs.forEach(c=>{const s=soldC(c.id),ci=A.comptes.indexOf(c);let pH='';if(type==='epargne'){const tots={};A.poches.forEach(p=>tots[p.id]=soldP(p.id));const grand=Object.values(tots).reduce((s,v)=>s+v,0);if(grand)pH=`<div style="margin-top:10px;border-top:.5px solid rgba(58,138,106,.2);padding-top:8px">${A.poches.map(p=>tots[p.id]?`<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px"><span>${p.nom}</span><span style="font-weight:500;color:${p.color}">${fE(tots[p.id])}</span></div>`:'').join('')}<div style="font-size:9px;color:var(--text3);margin-top:3px">Non affecté : ${fE(s-grand)}</div></div>`}h+=`<div class="ccard ${cbg(type)}"><div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div style="font-size:12px;font-weight:500;color:var(--text2)">${c.nom}</div>${c.notes?`<div style="font-size:10px;color:var(--text3)">${c.notes}</div>`:''}</div><div style="display:flex;gap:4px"><button class="btn btns" onclick="openEditCpt(${ci})">✏️</button><button class="btnd" onclick="delCompte(${ci})">✕</button></div></div><div style="margin-top:10px"><div style="font-size:22px;font-weight:500;color:${s>=0?TYC[type]:'var(--err)'}">${fE(s)}</div><div style="font-size:10px;color:var(--text3);margin-top:2px">Solde initial ${fE(c.soldeInit)} au ${c.soldeDate||'—'}</div></div>${pH}</div>`})})
   h+=`<div style="margin-top:8px"><button class="btn btns" style="background:linear-gradient(135deg,var(--mint-d),var(--mauve-d));color:#fff;border:none" onclick="openNewOp()">+ Opération</button></div>`
   return h
 }
@@ -581,6 +635,7 @@ function fillSels(){['o_cpt','o_from','o_to'].forEach(id=>{const el=document.get
 function openNewCpt(){A.editCptI=null;document.getElementById('mCompteTitle').textContent='Nouveau compte';['c_nom','c_notes'].forEach(id=>document.getElementById(id).value='');document.getElementById('c_type').value='perso';document.getElementById('c_solde').value='';document.getElementById('c_date').value=td();openM('mCompte')}
 function openEditCpt(i){const c=A.comptes[i];A.editCptI=i;document.getElementById('mCompteTitle').textContent='Modifier';document.getElementById('c_nom').value=c.nom;document.getElementById('c_type').value=c.type;document.getElementById('c_solde').value=c.soldeInit;document.getElementById('c_date').value=c.soldeDate||td();document.getElementById('c_notes').value=c.notes||'';openM('mCompte')}
 function saveCompte(){const nom=document.getElementById('c_nom').value.trim();if(!nom)return;const obj={id:A.editCptI!==null?A.comptes[A.editCptI].id:'c'+Date.now(),nom,type:document.getElementById('c_type').value,soldeInit:parseFloat(document.getElementById('c_solde').value)||0,soldeDate:document.getElementById('c_date').value,notes:document.getElementById('c_notes').value};if(A.editCptI!==null)A.comptes[A.editCptI]=obj;else A.comptes.push(obj);sv('cts_comptes',A.comptes);closeM('mCompte');render()}
+function delCompte(ci){const c=A.comptes[ci];if(!c)return;const n=A.ops.filter(o=>o.cpt===c.id||o.from===c.id||o.to===c.id).length;const msg=n>0?`Ce compte a ${n} opération(s) liée(s) qui resteront dans l'historique mais ne seront plus rattachées à aucun compte. Supprimer quand même ?`:'Supprimer ce compte ?';if(!confirm(msg))return;A.comptes.splice(ci,1);sv('cts_comptes',A.comptes);render()}
 function openNewOp(t='credit'){A.editKey=null;A.editI=null;fillSels();document.getElementById('o_type').value=t;document.getElementById('o_date').value=td();['o_montant','o_desc','o_note'].forEach(id=>document.getElementById(id).value='');document.getElementById('o_enfant').value='';document.getElementById('o_poche').value='';refreshOpForm();openM('mOp')}
 function openNewVir(){openNewOp('virement')}
 function editOp(gi){const op=A.ops[gi];A.editKey='ops';A.editI=gi;fillSels();document.getElementById('o_type').value=op.type;refreshOpForm();const sel=document.getElementById('o_cat');if(sel&&op.cat&&![...sel.options].some(o=>o.value===op.cat)){const o=document.createElement('option');o.value=op.cat;o.textContent=op.cat;sel.insertBefore(o,sel.lastElementChild)}if(sel)sel.value=op.cat;document.getElementById('o_montant').value=op.m;document.getElementById('o_date').value=op.date||'';document.getElementById('o_desc').value=op.desc||'';document.getElementById('o_note').value=op.note||'';document.getElementById('o_poche').value=op.poche||'';document.getElementById('o_enfant').value=op.enfant||'';if(op.type==='virement'){document.getElementById('o_from').value=op.from;document.getElementById('o_to').value=op.to}else document.getElementById('o_cpt').value=op.cpt;openM('mOp')}
@@ -711,7 +766,7 @@ function rVie(){
 function vAuj(){
   const today=td(),h=gH(today),now=new Date(),habs=allH()
   let html=`<div class="card" style="border-left:3px solid var(--rose);border-radius:0 12px 12px 0;margin-bottom:12px"><div style="font-weight:500;font-size:14px">${now.toLocaleDateString('fr-FR',{weekday:'long',day:'numeric',month:'long'})}</div></div>`
-  html+=`<div class="card"><h3>Mon quotidien <button class="btn btns" style="float:right;font-size:10px" onclick="openM('mHabPerso')">+ Habitude</button></h3><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">${habs.map(hab=>`<button class="tog${h[hab.id]?' on':''}" onclick="tgH('${today}','${hab.id}')"><span class="tog-e">${hab.emoji}</span><span class="tog-l">${hab.nom}</span></button>`).join('')}</div>`
+  html+=`<div class="card"><h3>Mon quotidien <button class="btn btns" style="float:right;font-size:10px" onclick="openNewHabPerso()">+ Habitude</button></h3><div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px">${habs.map(hab=>`<button class="tog${h[hab.id]?' on':''}" onclick="tgH('${today}','${hab.id}')"><span class="tog-e">${hab.emoji}</span><span class="tog-l">${hab.nom}</span></button>`).join('')}</div>${A.habPerso.length?`<details><summary style="font-size:10px;color:var(--text3);cursor:pointer">Gérer mes habitudes perso</summary><div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">${A.habPerso.map(hp=>`<span style="display:inline-flex;align-items:center;gap:5px;padding:3px 5px 3px 9px;border-radius:12px;background:var(--lav2);font-size:10px"><span style="cursor:pointer" onclick="editHabPerso('${hp.id}')">${hp.emoji} ${hp.nom} ✏️</span><span style="cursor:pointer;opacity:.7" onclick="delHabPerso('${hp.id}')">✕</span></span>`).join('')}</div></details>`:''}</div>`
   if(h.marche)html+=`<div style="margin-bottom:10px"><label style="margin-top:0">Distance / pas</label><input value="${h.marche_detail||''}" placeholder="6 km ou 8500 pas" onchange="sH('${today}','marche_detail',this.value)"></div>`
   html+=`</div>`
   html+=`<div class="card"><h3>7 derniers jours</h3><div style="display:flex;gap:4px;overflow-x:auto;padding-bottom:4px">`
@@ -794,7 +849,10 @@ function fillObjHabSel(sel){sel.innerHTML=allH().map(h=>`<option value="${h.id}"
 function openNewObj(){A.editKey=null;A.editI=null;const sel=document.getElementById('obj_hab');fillObjHabSel(sel);document.getElementById('obj_emoji').value=allH()[0]?.emoji||'🎯';document.getElementById('obj_fn').value='5';document.getElementById('obj_fp').value='semaine';document.getElementById('obj_col').value='var(--mint-d)';openM('mObj')}
 function editObj(i){const o=A.objectifs[i];A.editKey='objectifs';A.editI=i;const sel=document.getElementById('obj_hab');fillObjHabSel(sel);sel.value=o.hab;document.getElementById('obj_emoji').value=o.emoji||'🎯';document.getElementById('obj_fn').value=o.freqN;document.getElementById('obj_fp').value=o.freqP;document.getElementById('obj_col').value=o.color||'var(--mint-d)';openM('mObj')}
 function saveObj(){const h=document.getElementById('obj_hab').value;if(!h)return;commitEdit('objectifs','vie_obj',{hab:h,emoji:document.getElementById('obj_emoji').value||'🎯',freqN:document.getElementById('obj_fn').value,freqP:document.getElementById('obj_fp').value,color:document.getElementById('obj_col').value},false);closeM('mObj');render()}
-function saveHabPerso(){const n=document.getElementById('hp_nom').value.trim();if(!n)return;A.habPerso.push({id:'hp_'+Date.now(),nom:n,emoji:document.getElementById('hp_emoji').value||'⭐'});sv('vie_hab_perso',A.habPerso);closeM('mHabPerso');render()}
+function openNewHabPerso(){A.editKey=null;A.editI=null;document.getElementById('hp_nom').value='';document.getElementById('hp_emoji').value='';openM('mHabPerso')}
+function editHabPerso(id){const i=A.habPerso.findIndex(h=>h.id===id);if(i<0)return;A.editKey='habPerso';A.editI=i;document.getElementById('hp_nom').value=A.habPerso[i].nom;document.getElementById('hp_emoji').value=A.habPerso[i].emoji;openM('mHabPerso')}
+function delHabPerso(id){if(!confirm('Supprimer cette habitude ? (ton historique de suivi restera mais elle ne sera plus proposée)'))return;A.habPerso=A.habPerso.filter(h=>h.id!==id);sv('vie_hab_perso',A.habPerso);render()}
+function saveHabPerso(){const n=document.getElementById('hp_nom').value.trim();if(!n)return;const emoji=document.getElementById('hp_emoji').value||'⭐';if(A.editKey==='habPerso'&&A.editI!==null){A.habPerso[A.editI].nom=n;A.habPerso[A.editI].emoji=emoji}else{A.habPerso.push({id:'hp_'+Date.now(),nom:n,emoji})}sv('vie_hab_perso',A.habPerso);A.editKey=null;A.editI=null;closeM('mHabPerso');render()}
 
 // ═══════════ CARNET ═══════════
 const gCTag=id=>A.ctags.find(t=>t.id===id)
